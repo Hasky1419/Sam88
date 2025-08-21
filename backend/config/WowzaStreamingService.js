@@ -843,7 +843,7 @@ class WowzaStreamingService {
                     fallback_mode: true,
                     warning: 'Dados simulados - Wowza API indisponível'
 
-        } catch (error) {
+                        } catch (error) {
             console.error('Erro ao obter estatísticas do stream OBS:', error);
             return {
                 isActive: false,
@@ -853,6 +853,8 @@ class WowzaStreamingService {
                 uptime: '00:00:00',
                 error: error.message
             };
+        }
+                }
         }
     }
 
