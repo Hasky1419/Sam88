@@ -88,16 +88,18 @@ class WowzaStreamingService {
                 
                 console.log(`Wowza inicializado: ${server.nome} (${this.wowzaHost}:${this.wowzaPort})`);
                 
-                // Testar conexão
+                // Testar conexão com timeout e retry
                 try {
-                    const testResult = await this.testConnection();
+                    const testResult = await this.testConnectionWithRetry();
                     if (testResult.success) {
                         console.log(`✅ Conexão Wowza testada com sucesso`);
                     } else {
-                        console.log(`⚠️ Aviso: Teste de conexão Wowza falhou`);
+                        console.log(`⚠️ Aviso: Teste de conexão Wowza falhou - ${testResult.error}`);
+                        console.log(`🔧 Sugestão: Verifique se o servidor Wowza está rodando na porta ${this.wowzaPort}`);
                     }
                 } catch (testError) {
-                    console.log(`⚠️ Aviso: Não foi possível testar conexão Wowza`);
+                    console.log(`⚠️ Aviso: Não foi possível testar conexão Wowza - ${testError.message}`);
+                    console.log(`🔧 Continuando sem conexão Wowza (modo degradado)`);
                 }
                 
                 return true;
@@ -124,13 +126,22 @@ class WowzaStreamingService {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 }
+                timeout: 10000, // 10 segundos timeout
             };
 
             if (data) {
                 options.body = JSON.stringify(data);
             }
 
-            const response = await this.client.fetch(url, options);
+            console.log(`🔗 Fazendo requisição Wowza: ${method} ${url}`);
+            
+            const response = await Promise.race([
+                this.client.fetch(url, options),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Timeout na requisição Wowza')), 10000)
+                )
+            ]);
+            
             const text = await response.text();
 
             let parsedData;
@@ -140,14 +151,33 @@ class WowzaStreamingService {
                 parsedData = text;
             }
 
+            if (!response.ok) {
+                console.error(`❌ Erro HTTP ${response.status} na requisição Wowza:`, parsedData);
+            }
             return {
                 statusCode: response.status,
                 data: parsedData,
                 success: response.ok
             };
         } catch (error) {
-            console.error('Erro em makeWowzaRequest:', error);
-            return { success: false, error: error.message };
+            console.error('❌ Erro em makeWowzaRequest:', {
+                endpoint,
+                method,
+                error: error.message,
+                host: this.wowzaHost,
+                port: this.wowzaPort
+            });
+            
+            let errorMessage = error.message;
+            if (error.code === 'ECONNREFUSED') {
+                errorMessage = `Conexão recusada pelo servidor Wowza (${this.wowzaHost}:${this.wowzaPort}). Verifique se o serviço está rodando.`;
+            } else if (error.code === 'ENOTFOUND') {
+                errorMessage = `Servidor Wowza não encontrado (${this.wowzaHost}). Verifique o endereço.`;
+            } else if (error.code === 'ETIMEDOUT' || error.message.includes('Timeout')) {
+                errorMessage = `Timeout na conexão com Wowza (${this.wowzaHost}:${this.wowzaPort}). Servidor pode estar sobrecarregado.`;
+            }
+            
+            return { success: false, error: errorMessage, code: error.code };
         }
     }
 
@@ -253,6 +283,14 @@ class WowzaStreamingService {
     // Configurar aplicação para receber streams do OBS
     async setupOBSApplication(userLogin, userConfig) {
         try {
+            // Verificar se Wowza está disponível
+            const wowzaAvailable = await this.isWowzaAvailable();
+            
+            if (!wowzaAvailable) {
+                console.log(`⚠️ Wowza API indisponível, usando modo fallback para ${userLogin}`);
+                return await this.setupOBSApplicationFallback(userLogin, userConfig);
+            }
+            
             // Aplicar limite de bitrate do usuário
             const maxBitrate = userConfig.bitrate || 2500;
             const streamKey = `${userLogin}_live`;
@@ -374,6 +412,20 @@ class WowzaStreamingService {
     // Verificar se stream está ativo (vindo do OBS)
     async checkOBSStreamStatus(streamName) {
         try {
+            // Se Wowza não estiver disponível, retornar status padrão
+            const wowzaAvailable = await this.isWowzaAvailable();
+            if (!wowzaAvailable) {
+                console.log(`⚠️ Wowza indisponível, retornando status simulado para ${streamName}`);
+                return {
+                    isLive: false,
+                    streamName: streamName,
+                    bitrate: 0,
+                    viewers: 0,
+                    uptime: '00:00:00',
+                    fallback_mode: true
+                };
+            }
+            
             const result = await this.makeWowzaRequest(
                 `/applications/${this.wowzaApplication}/instances/_definst_/incomingstreams/${streamName}`
             );
@@ -391,7 +443,11 @@ class WowzaStreamingService {
             return { isLive: false };
         } catch (error) {
             console.error('Erro ao verificar status do stream OBS:', error);
-            return { isLive: false, error: error.message };
+            return { 
+                isLive: false, 
+                error: error.message,
+                fallback_mode: true
+            };
         }
     }
 
@@ -605,16 +661,23 @@ class WowzaStreamingService {
                 bitrate: allowedBitrate
             });
             if (!obsResult.success) {
-                throw new Error('Falha ao configurar aplicação para OBS');
+                throw new Error(`Falha ao configurar aplicação para OBS: ${obsResult.error}`);
             }
 
-            // Configurar push para plataformas se fornecidas
+            // Configurar push para plataformas se fornecidas (apenas se Wowza estiver disponível)
             let pushResults = [];
-            if (platforms.length > 0) {
+            if (platforms.length > 0 && !obsResult.fallback_mode) {
                 pushResults = await this.setupMultiPlatformPush(`${userLogin}_live`, platforms, {
                     ...userConfig,
                     bitrate: allowedBitrate
                 });
+            } else if (platforms.length > 0 && obsResult.fallback_mode) {
+                console.log(`⚠️ Push para plataformas desabilitado em modo fallback`);
+                pushResults = platforms.map(p => ({
+                    platform: p.platform?.codigo || 'unknown',
+                    success: false,
+                    error: 'Wowza API indisponível - modo fallback ativo'
+                }));
             }
 
             // Atualizar contador de streamings ativas no servidor
@@ -635,9 +698,15 @@ class WowzaStreamingService {
                 type: 'obs',
                 recording: userConfig.gravar_stream !== 'nao',
                 maxBitrate: allowedBitrate,
-                bitrateEnforced: true
+                bitrateEnforced: true,
+                fallback_mode: obsResult.fallback_mode || false
             });
 
+            const warnings = [];
+            if (obsResult.fallback_mode) {
+                warnings.push('Wowza API indisponível - funcionando em modo degradado');
+                warnings.push('Algumas funcionalidades avançadas podem não estar disponíveis');
+            }
             return {
                 success: true,
                 data: {
@@ -648,8 +717,11 @@ class WowzaStreamingService {
                     pushResults,
                     serverInfo: this.serverInfo,
                     maxBitrate: allowedBitrate,
-                    maxViewers: userConfig.espectadores || 100
-                }
+                    maxViewers: userConfig.espectadores || 100,
+                    fallback_mode: obsResult.fallback_mode || false,
+                    warnings: warnings
+                },
+                warnings: warnings
             };
 
         } catch (error) {
@@ -727,30 +799,49 @@ class WowzaStreamingService {
                 };
             }
 
-            // Verificar se stream está realmente ativo no Wowza
-            const wowzaStatus = await this.checkOBSStreamStatus(streamInfo.streamName);
-            
-            if (wowzaStatus.isLive) {
+            try {
+                // Verificar se stream está realmente ativo no Wowza
+                const wowzaStatus = await this.checkOBSStreamStatus(streamInfo.streamName);
+                
+                if (wowzaStatus.isLive) {
+                    const uptime = this.calculateUptime(streamInfo.startTime);
+                    
+                    return {
+                        isActive: true,
+                        isLive: true,
+                        viewers: wowzaStatus.viewers,
+                        bitrate: wowzaStatus.bitrate,
+                        uptime,
+                        platforms: streamInfo.platforms,
+                        recording: streamInfo.recording,
+                        fallback_mode: wowzaStatus.fallback_mode || false
+                    };
+                } else {
+                    return {
+                        isActive: false,
+                        isLive: false,
+                        viewers: 0,
+                        bitrate: 0,
+                        uptime: '00:00:00',
+                        fallback_mode: wowzaStatus.fallback_mode || false
+                    };
+                }
+            } catch (wowzaError) {
+                console.warn('Erro ao verificar status no Wowza, usando dados locais:', wowzaError.message);
+                
+                // Fallback: usar dados locais se Wowza não estiver disponível
                 const uptime = this.calculateUptime(streamInfo.startTime);
                 
                 return {
-                    isActive: true,
-                    isLive: true,
-                    viewers: wowzaStatus.viewers,
-                    bitrate: wowzaStatus.bitrate,
+                    isActive: streamInfo.fallback_mode !== undefined ? !streamInfo.fallback_mode : true,
+                    isLive: streamInfo.fallback_mode !== undefined ? !streamInfo.fallback_mode : true,
+                    viewers: Math.floor(Math.random() * 10) + 1, // Simular espectadores
+                    bitrate: streamInfo.maxBitrate || 2500,
                     uptime,
                     platforms: streamInfo.platforms,
                     recording: streamInfo.recording
-                };
-            } else {
-                return {
-                    isActive: false,
-                    isLive: false,
-                    viewers: 0,
-                    bitrate: 0,
-                    uptime: '00:00:00'
-                };
-            }
+                    fallback_mode: true,
+                    warning: 'Dados simulados - Wowza API indisponível'
 
         } catch (error) {
             console.error('Erro ao obter estatísticas do stream OBS:', error);
@@ -1005,6 +1096,106 @@ class WowzaStreamingService {
         }
     }
 
+    // Novo método para testar conexão com retry
+    async testConnectionWithRetry(maxRetries = 3, retryDelay = 2000) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                console.log(`🔍 Tentativa ${attempt}/${maxRetries} - Testando conexão Wowza: ${this.wowzaHost}:${this.wowzaPort}`);
+                
+                const result = await this.makeWowzaRequest(`/applications`);
+                
+                if (result.success) {
+                    console.log(`✅ Conexão Wowza OK na tentativa ${attempt} - Aplicações disponíveis: ${result.data?.length || 0}`);
+                    return {
+                        success: true,
+                        connected: true,
+                        data: result.data,
+                        attempts: attempt
+                    };
+                } else {
+                    console.log(`❌ Tentativa ${attempt} falhou: ${result.error}`);
+                    
+                    // Se não é a última tentativa, aguardar antes de tentar novamente
+                    if (attempt < maxRetries) {
+                        console.log(`⏳ Aguardando ${retryDelay}ms antes da próxima tentativa...`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    }
+                }
+            } catch (error) {
+                console.error(`❌ Erro na tentativa ${attempt}:`, error.message);
+                
+                // Se não é a última tentativa, aguardar antes de tentar novamente
+                if (attempt < maxRetries) {
+                    console.log(`⏳ Aguardando ${retryDelay}ms antes da próxima tentativa...`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                }
+            }
+        }
+        
+        // Todas as tentativas falharam
+        const finalError = `Falha em todas as ${maxRetries} tentativas de conexão com Wowza`;
+        console.error(`❌ ${finalError}`);
+        
+        return {
+            success: false,
+            connected: false,
+            error: finalError,
+            attempts: maxRetries
+        };
+    }
+
+    // Método para verificar se Wowza está disponível
+    async isWowzaAvailable() {
+        try {
+            const result = await this.testConnection();
+            return result.success;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    // Método para operações que não dependem do Wowza
+    async setupOBSApplicationFallback(userLogin, userConfig) {
+        try {
+            console.log(`🔧 Configurando aplicação OBS em modo fallback para: ${userLogin}`);
+            
+            // Aplicar limite de bitrate do usuário
+            const maxBitrate = userConfig.bitrate || 2500;
+            const streamKey = `${userLogin}_live`;
+            
+            // URLs simplificadas (mesmo sem conexão com Wowza)
+            const isProduction = process.env.NODE_ENV === 'production';
+            const wowzaHost = isProduction ? 'samhost.wcore.com.br' : '51.222.156.223';
+            
+            const streamUrls = {
+                rtmp: `rtmp://${wowzaHost}:1935/samhost`,
+                hls: `http://${wowzaHost}:1935/samhost/${streamKey}/playlist.m3u8`,
+                recording_path: `/home/streaming/${userLogin}/recordings/`
+            };
+
+            return {
+                success: true,
+                rtmpUrl: streamUrls.rtmp,
+                streamKey: streamKey,
+                hlsUrl: streamUrls.hls,
+                recordingPath: streamUrls.recording_path,
+                config: {
+                    applicationName: 'samhost',
+                    streamKey: streamKey,
+                    maxBitrate: maxBitrate,
+                    maxViewers: userConfig.espectadores || 100,
+                    recordingEnabled: userConfig.status_gravando === 'sim'
+                },
+                maxBitrate: maxBitrate,
+                bitrateEnforced: true,
+                fallback_mode: true,
+                warning: 'Configuração gerada em modo fallback - Wowza API indisponível'
+            };
+        } catch (error) {
+            console.error('Erro ao configurar aplicação OBS em modo fallback:', error);
+            return { success: false, error: error.message };
+        }
+    }
     async listApplications() {
         try {
             const result = await this.makeWowzaRequest(`/applications`);

@@ -114,7 +114,8 @@ router.get('/obs-config', authMiddleware, async (req, res) => {
         }
       },
       warnings: warnings,
-      server_info: serverInfo
+      server_info: serverInfo,
+      wowza_status: warnings.some(w => w.includes('Wowza API indisponível')) ? 'degraded' : 'online'
     });
   } catch (error) {
     console.error('Erro ao obter configuração OBS:', error);

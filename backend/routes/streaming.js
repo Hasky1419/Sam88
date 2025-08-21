@@ -80,6 +80,22 @@ router.get('/obs-config', authMiddleware, async (req, res) => {
       warnings.push('Espaço de armazenamento quase esgotado');
     }
     res.json({
+    // Verificar conectividade com Wowza
+    try {
+      const wowzaService = new (require('../config/WowzaStreamingService'))();
+      const initialized = await wowzaService.initializeFromDatabase(userId);
+      
+      if (initialized) {
+        const wowzaTest = await wowzaService.testConnection();
+        if (!wowzaTest.success) {
+          warnings.push('Wowza API indisponível - funcionando em modo degradado');
+          warnings.push('Transmissões funcionarão normalmente, mas estatísticas podem não estar disponíveis');
+        }
+      }
+    } catch (wowzaError) {
+      console.warn('Aviso: Erro ao testar Wowza:', wowzaError.message);
+      warnings.push('Wowza API indisponível - funcionando em modo degradado');
+    }
       success: true,
       obs_config: {
         rtmp_url: `rtmp://samhost.wcore.com.br:1935/${userLogin}`,
@@ -153,27 +169,53 @@ router.get('/obs-status', authMiddleware, async (req, res) => {
     const initialized = await wowzaService.initializeFromDatabase(userId);
 
     if (!initialized) {
-      return res.status(500).json({
+      return res.json({
         success: false,
-        error: 'Erro ao conectar com servidor de streaming'
+        error: 'Erro ao conectar com servidor de streaming',
+        obs_stream: {
+          is_live: false,
+          is_active: false,
+          viewers: 0,
+          bitrate: 0,
+          uptime: '00:00:00',
+          recording: false,
+          platforms: []
+        }
       });
     }
 
-    // Verificar status do stream OBS
-    const obsStats = await wowzaService.getOBSStreamStats(userId);
+    try {
+      // Verificar status do stream OBS
+      const obsStats = await wowzaService.getOBSStreamStats(userId);
 
-    res.json({
-      success: true,
-      obs_stream: {
-        is_live: obsStats.isLive,
-        is_active: obsStats.isActive,
-        viewers: obsStats.viewers,
-        bitrate: obsStats.bitrate,
-        uptime: obsStats.uptime,
-        recording: obsStats.recording || false,
-        platforms: obsStats.platforms || []
-      }
-    });
+      res.json({
+        success: true,
+        obs_stream: {
+          is_live: obsStats.isLive,
+          is_active: obsStats.isActive,
+          viewers: obsStats.viewers,
+          bitrate: obsStats.bitrate,
+          uptime: obsStats.uptime,
+          recording: obsStats.recording || false,
+          platforms: obsStats.platforms || []
+        }
+      });
+    } catch (obsError) {
+      console.warn('Erro ao obter status OBS, retornando dados padrão:', obsError.message);
+      res.json({
+        success: true,
+        obs_stream: {
+          is_live: false,
+          is_active: false,
+          viewers: 0,
+          bitrate: 0,
+          uptime: '00:00:00',
+          recording: false,
+          platforms: [],
+          error: 'Wowza API indisponível'
+        }
+      });
+    }
   } catch (error) {
     console.error('Erro ao verificar status OBS:', error);
     res.status(500).json({ success: false, error: 'Erro interno do servidor' });

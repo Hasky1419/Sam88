@@ -64,6 +64,7 @@ const DadosConexao: React.FC = () => {
     message: string;
     canStream: boolean;
   }>({ isValid: true, message: '', canStream: true });
+  const [wowzaStatus, setWowzaStatus] = useState<'online' | 'degraded' | 'offline'>('online');
 
   const userLogin = user?.usuario || (user?.email ? user.email.split('@')[0] : `user_${user?.id || 'usuario'}`);
 
@@ -94,6 +95,7 @@ const DadosConexao: React.FC = () => {
           setUserLimits(data.user_limits);
           setServerInfo(data.server_info);
           setWarnings(data.warnings || []);
+          setWowzaStatus(data.wowza_status || 'online');
 
           // Verificar se bitrate está dentro do limite
           if (data.user_limits?.bitrate) {
@@ -110,6 +112,7 @@ const DadosConexao: React.FC = () => {
       }
     } catch (error) {
       console.error('Erro ao carregar configuração OBS:', error);
+      setWowzaStatus('offline');
     }
   };
 
@@ -375,6 +378,12 @@ const DadosConexao: React.FC = () => {
             <Play className="h-6 w-6 text-green-600" />
             <h2 className="text-xl font-semibold text-gray-800">Configuração OBS/Streamlabs</h2>
             <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded">PRONTO PARA USO</span>
+            {wowzaStatus === 'degraded' && (
+              <span className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded">MODO DEGRADADO</span>
+            )}
+            {wowzaStatus === 'offline' && (
+              <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded">API OFFLINE</span>
+            )}
             <button
               onClick={() => setShowBitrateConfig(!showBitrateConfig)}
               className="ml-auto text-primary-600 hover:text-primary-800 text-sm flex items-center"
@@ -579,6 +588,12 @@ const DadosConexao: React.FC = () => {
               <p className="text-red-700 font-medium">⚠️ IMPORTANTE: Não exceda o bitrate de {userLimits?.bitrate.max || obsConfig.max_bitrate} kbps do seu plano!</p>
               <p className="text-red-700 font-medium">🚫 O sistema bloqueará automaticamente transmissões que excedam o limite</p>
               <p className="text-blue-700 font-medium">💡 Use a configuração de bitrate acima para testar diferentes valores</p>
+              {wowzaStatus === 'degraded' && (
+                <p className="text-yellow-700 font-medium">⚠️ MODO DEGRADADO: Wowza API indisponível, mas transmissões funcionam normalmente</p>
+              )}
+              {wowzaStatus === 'offline' && (
+                <p className="text-red-700 font-medium">🔴 API OFFLINE: Algumas funcionalidades podem estar limitadas</p>
+              )}
             </div>
           </div>
         </div >
