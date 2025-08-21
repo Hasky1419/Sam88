@@ -12,8 +12,20 @@ class WowzaConfigManager {
         try {
             console.log(`🔧 Criando estrutura Wowza para usuário: ${userLogin}`);
 
-            // Apenas criar diretório de streaming básico
+            // Criar diretório de streaming básico
             await this.createUserStreamingDirectory(serverId, userLogin);
+            
+            // Aguardar criação
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Verificar se foi criado
+            const userPath = `${this.streamingBasePath}/${userLogin}`;
+            const SSHManager = require('./SSHManager');
+            const pathExists = await SSHManager.checkDirectoryExists(serverId, userPath);
+            
+            if (!pathExists) {
+                throw new Error(`Diretório não foi criado: ${userPath}`);
+            }
 
             console.log(`✅ Estrutura Wowza criada com sucesso para ${userLogin}`);
             return { success: true };

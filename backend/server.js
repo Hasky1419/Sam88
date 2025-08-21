@@ -577,14 +577,17 @@ app.use('/api/dados-conexao', dadosConexaoRoutes);
       
       if (!dbConnected) {
         console.error('❌ Não foi possível conectar ao banco de dados');
-        process.exit(1);
+        console.error('⚠️ Continuando sem banco de dados para debug...');
       }
 
       app.listen(PORT, () => {
         console.log(`🚀 Servidor rodando na porta ${PORT}`);
+        console.log(`🌐 Frontend: http://localhost:3000`);
+        console.log(`🔧 Backend: http://localhost:${PORT}`);
         console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
         console.log(`🔧 API test: http://localhost:${PORT}/api/test`);
         console.log(`🔗 SSH Manager inicializado para uploads remotos`);
+        console.log(`📡 Ambiente: ${process.env.NODE_ENV || 'development'}`);
       });
       
       // Cleanup ao fechar aplicação

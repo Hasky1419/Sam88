@@ -111,15 +111,20 @@ router.post('/', authMiddleware, async (req, res) => {
       await SSHManager.createUserFolder(serverId, userLogin, sanitizedName);
       
       console.log(`✅ Pasta ${sanitizedName} criada no servidor para usuário ${userLogin}`);
-
-      // Atualizar arquivo SMIL do usuário após criar pasta
-      try {
-        const PlaylistSMILService = require('../services/PlaylistSMILService');
-        await PlaylistSMILService.updateUserSMIL(userId, userLogin, serverId);
-        console.log(`✅ Arquivo SMIL atualizado após criar pasta para usuário ${userLogin}`);
-      } catch (smilError) {
-        console.warn('Erro ao atualizar arquivo SMIL:', smilError.message);
+      console.log(`📁 Caminho completo: ${caminhoServidor}`);
+      
+      // Verificar se pasta foi realmente criada
+      const checkCommand = `test -d "${caminhoServidor}" && echo "EXISTS" || echo "NOT_EXISTS"`;
+      const checkResult = await SSHManager.executeCommand(serverId, checkCommand);
+      
+      if (!checkResult.stdout.includes('EXISTS')) {
+        throw new Error(`Pasta não foi criada no servidor: ${caminhoServidor}`);
       }
+      
+      console.log(`✅ Pasta verificada no servidor: ${caminhoServidor}`);
+
+      // Aguardar um pouco para garantir que pasta foi criada
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
     } catch (sshError) {
       console.error('Erro ao criar pasta no servidor:', sshError);
@@ -129,6 +134,15 @@ router.post('/', authMiddleware, async (req, res) => {
         error: 'Erro ao criar pasta no servidor',
         details: sshError.message 
       });
+    }
+
+    // Atualizar arquivo SMIL do usuário após criar pasta (fora do try/catch SSH)
+    try {
+      const PlaylistSMILService = require('../services/PlaylistSMILService');
+      await PlaylistSMILService.updateUserSMIL(userId, userLogin, serverId);
+      console.log(`✅ Arquivo SMIL atualizado após criar pasta para usuário ${userLogin}`);
+    } catch (smilError) {
+      console.warn('Erro ao atualizar arquivo SMIL:', smilError.message);
     }
 
     res.status(201).json({

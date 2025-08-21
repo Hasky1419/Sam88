@@ -68,7 +68,7 @@ class WowzaStreamingService {
             if (serverRows.length > 0) {
                 const server = serverRows[0];
                 this.serverId = server.codigo;
-                this.wowzaHost = server.dominio || server.ip; // Priorizar domínio
+                this.wowzaHost = server.ip || server.dominio; // Priorizar IP para evitar problemas de DNS
                 this.wowzaPort = 6980; // Porta da API REST do Wowza
                 this.wowzaUser = 'admin'; // Usuário padrão da API
                 this.wowzaPassword = 'FK38Ca2SuE6jvJXed97VMn'; // Senha correta do Wowza
@@ -86,7 +86,7 @@ class WowzaStreamingService {
                 this.baseUrl = `http://${this.wowzaHost}:${this.wowzaPort}/v2/servers/_defaultServer_/vhosts/_defaultVHost_`;
                 this.client = new DigestFetch(this.wowzaUser, this.wowzaPassword);
                 
-                console.log(`Wowza inicializado: ${server.nome} (${server.dominio || server.ip})`);
+                console.log(`Wowza inicializado: ${server.nome} (${this.wowzaHost}:${this.wowzaPort})`);
                 
                 // Testar conexão
                 try {

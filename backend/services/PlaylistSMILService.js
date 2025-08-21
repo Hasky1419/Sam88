@@ -367,8 +367,13 @@ class PlaylistSMILService {
     async checkSMILExists(serverId, userLogin) {
         try {
             const smilPath = `/home/streaming/${userLogin}/playlists_agendamentos.smil`;
-            const fileInfo = await SSHManager.getFileInfo(serverId, smilPath);
-            return fileInfo.exists;
+            try {
+                const fileInfo = await SSHManager.getFileInfo(serverId, smilPath);
+                return fileInfo.exists;
+            } catch (sshError) {
+                console.warn(`Erro ao verificar SMIL para ${userLogin}:`, sshError.message);
+                return false;
+            }
         } catch (error) {
             console.error(`Erro ao verificar SMIL para ${userLogin}:`, error);
             return false;

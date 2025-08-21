@@ -163,15 +163,29 @@ class SSHManager {
                 `mkdir -p ${userDir}`,
                 `mkdir -p ${userDir}/recordings`,
                 `mkdir -p ${userDir}/logos`,
-                `chown -R streaming:streaming ${userDir}`,
-                `chmod -R 755 ${userDir}`
+                `chown -R streaming:streaming ${userDir} || true`,
+                `chmod -R 755 ${userDir} || true`
             ];
 
             for (const command of commands) {
-                await this.executeCommand(serverId, command);
+                try {
+                    const result = await this.executeCommand(serverId, command);
+                    console.log(`✅ Comando executado: ${command}`);
+                    if (result.stderr) {
+                        console.warn(`⚠️ Aviso no comando "${command}": ${result.stderr}`);
+                    }
+                } catch (cmdError) {
+                    console.warn(`⚠️ Erro no comando "${command}": ${cmdError.message}`);
+                    // Continuar mesmo com erros de permissão
+                }
             }
 
             console.log(`✅ Diretório criado para usuário ${userLogin} no servidor ${serverId}`);
+            
+            // Verificar se diretório foi criado
+            const checkResult = await this.executeCommand(serverId, `ls -la ${userDir}`);
+            console.log(`📁 Conteúdo do diretório ${userDir}:`, checkResult.stdout);
+            
             return { success: true, userDir };
         } catch (error) {
             console.error(`Erro ao criar diretório para usuário ${userLogin}:`, error);
@@ -185,16 +199,30 @@ class SSHManager {
             const folderPath = `/home/streaming/${userLogin}/${folderName}`;
             const commands = [
                 `mkdir -p ${folderPath}`,
-                `chown -R streaming:streaming ${folderPath}`,
-                `chmod -R 755 ${folderPath}`
+                `chown -R streaming:streaming ${folderPath} || true`,
+                `chmod -R 755 ${folderPath} || true`
             ];
 
             for (const command of commands) {
-                await this.executeCommand(serverId, command);
+                try {
+                    const result = await this.executeCommand(serverId, command);
+                    console.log(`✅ Comando executado: ${command}`);
+                    if (result.stderr) {
+                        console.warn(`⚠️ Aviso no comando "${command}": ${result.stderr}`);
+                    }
+                } catch (cmdError) {
+                    console.warn(`⚠️ Erro no comando "${command}": ${cmdError.message}`);
+                    // Continuar mesmo com erros de permissão
+                }
             }
 
             console.log(`✅ Pasta ${folderName} criada para usuário ${userLogin}`);
             console.log(`📁 Caminho completo: ${folderPath}`);
+            
+            // Verificar se pasta foi criada
+            const checkResult = await this.executeCommand(serverId, `ls -la ${folderPath}`);
+            console.log(`📁 Pasta criada com sucesso: ${folderPath}`);
+            
             return { success: true, folderPath };
         } catch (error) {
             console.error(`Erro ao criar pasta ${folderName}:`, error);

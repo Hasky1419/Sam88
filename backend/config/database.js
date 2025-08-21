@@ -30,7 +30,7 @@ const pool = mysql.createPool({
 async function testConnection() {
   try {
     const connection = await pool.getConnection();
-    console.log('✅ Conectado ao MySQL com sucesso!');
+    console.log(`✅ Conectado ao MySQL com sucesso! (${dbConfig.host}:${dbConfig.port})`);
     
     // Verificar se colunas necessárias existem na tabela videos
     try {
@@ -49,7 +49,12 @@ async function testConnection() {
     connection.release();
     return true;
   } catch (error) {
-    console.error('❌ Erro ao conectar ao MySQL:', error.message);
+    console.error('❌ Erro ao conectar ao MySQL:', {
+      message: error.message,
+      host: dbConfig.host,
+      port: dbConfig.port,
+      database: dbConfig.database
+    });
     return false;
   }
 }
