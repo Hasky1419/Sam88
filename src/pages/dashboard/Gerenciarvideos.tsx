@@ -110,6 +110,14 @@ const GerenciarVideos: React.FC = () => {
         setFolders(prev => prev.map(f =>
           f.id.toString() === folderId ? { ...f, ...folderInfo } : f
         ));
+        
+        // Se pasta foi criada recentemente e não existe no servidor, sincronizar
+        if (folderInfo.server_info && !folderInfo.server_info.exists) {
+          console.log('Pasta não detectada no servidor, tentando sincronizar...');
+          setTimeout(() => {
+            syncFolder(folderId);
+          }, 2000);
+        }
       }
     } catch (error) {
       console.error('Erro ao carregar informações da pasta:', error);
@@ -170,8 +178,18 @@ const GerenciarVideos: React.FC = () => {
         toast.success('Pasta criada com sucesso!');
         setShowNewFolderModal(false);
         setNewFolderName('');
-        loadFolders();
+        
+        // Aguardar um pouco antes de recarregar para dar tempo da pasta ser criada
+        setTimeout(() => {
+          loadFolders();
+        }, 1500);
+        
         setSelectedFolder(newFolder.id.toString());
+        
+        // Carregar informações da pasta após criação
+        setTimeout(() => {
+          loadFolderInfo(newFolder.id.toString());
+        }, 3000);
       } else {
         const errorData = await response.json();
         toast.error(errorData.error || 'Erro ao criar pasta');

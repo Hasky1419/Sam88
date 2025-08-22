@@ -5,6 +5,7 @@ const path = require('path');
 class SSHManager {
     constructor() {
         this.connections = new Map();
+        this.lastErrorLogged = 0; // Para evitar spam de logs
     }
 
     async getConnection(serverId) {
@@ -199,29 +200,33 @@ class SSHManager {
             const folderPath = `/home/streaming/${userLogin}/${folderName}`;
             const commands = [
                 `mkdir -p ${folderPath}`,
-                `chown -R streaming:streaming ${folderPath} || true`,
-                `chmod -R 755 ${folderPath} || true`
+                `chmod 755 ${folderPath}`,
+                `chown streaming:streaming ${folderPath} 2>/dev/null || true`
             ];
 
             for (const command of commands) {
                 try {
                     const result = await this.executeCommand(serverId, command);
-                    console.log(`✅ Comando executado: ${command}`);
                     if (result.stderr) {
-                        console.warn(`⚠️ Aviso no comando "${command}": ${result.stderr}`);
+                        console.warn(`⚠️ Aviso: ${result.stderr}`);
                     }
                 } catch (cmdError) {
-                    console.warn(`⚠️ Erro no comando "${command}": ${cmdError.message}`);
+                    console.warn(`⚠️ Erro: ${cmdError.message}`);
                     // Continuar mesmo com erros de permissão
                 }
             }
 
-            console.log(`✅ Pasta ${folderName} criada para usuário ${userLogin}`);
-            console.log(`📁 Caminho completo: ${folderPath}`);
+            // Aguardar um momento para garantir que pasta foi criada
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Verificar se pasta foi criada
-            const checkResult = await this.executeCommand(serverId, `ls -la ${folderPath}`);
-            console.log(`📁 Pasta criada com sucesso: ${folderPath}`);
+            const checkResult = await this.executeCommand(serverId, `test -d "${folderPath}" && echo "EXISTS" || echo "NOT_EXISTS"`);
+            
+            if (!checkResult.stdout.includes('EXISTS')) {
+                throw new Error(`Pasta não foi criada: ${folderPath}`);
+            }
+            
+            console.log(`✅ Pasta ${folderName} criada: ${folderPath}`);
             
             return { success: true, folderPath };
         } catch (error) {
@@ -275,7 +280,47 @@ class SSHManager {
             const result = await this.executeCommand(serverId, command);
             return result.stdout.includes('EXISTS');
         } catch (error) {
+            console.warn(`Erro ao verificar diretório ${path}:`, error.message);
             return false;
+        }
+    }
+
+    // Método otimizado para verificar e obter informações de pasta
+    async getFolderInfo(serverId, folderPath) {
+        try {
+            // Comando combinado para verificar existência e obter informações
+            const command = `if [ -d "${folderPath}" ]; then echo "EXISTS"; find "${folderPath}" -type f | wc -l; du -sb "${folderPath}" 2>/dev/null | cut -f1 || echo "0"; else echo "NOT_EXISTS"; fi`;
+            const result = await this.executeCommand(serverId, command);
+            
+            const lines = result.stdout.trim().split('\n');
+            
+            if (lines[0] === 'EXISTS') {
+                const fileCount = parseInt(lines[1]) || 0;
+                const sizeBytes = parseInt(lines[2]) || 0;
+                
+                return {
+                    exists: true,
+                    file_count: fileCount,
+                    size_bytes: sizeBytes,
+                    size_mb: Math.ceil(sizeBytes / (1024 * 1024)),
+                    path: folderPath
+                };
+            } else {
+                return {
+                    exists: false,
+                    file_count: 0,
+                    size_bytes: 0,
+                    size_mb: 0,
+                    path: folderPath
+                };
+            }
+        } catch (error) {
+            console.warn(`Erro ao obter informações da pasta ${folderPath}:`, error.message);
+            return {
+                exists: false,
+                error: error.message,
+                path: folderPath
+            };
         }
     }
 
@@ -306,18 +351,22 @@ class SSHManager {
 
     async getFileInfo(serverId, remotePath) {
         try {
-            const command = `ls -la "${remotePath}" 2>/dev/null || echo "FILE_NOT_FOUND"`;
+            const command = `stat "${remotePath}" 2>/dev/null && echo "EXISTS" || echo "NOT_EXISTS"`;
             const result = await this.executeCommand(serverId, command);
             
-            if (result.stdout.includes('FILE_NOT_FOUND')) {
+            if (result.stdout.includes('NOT_EXISTS')) {
                 return { exists: false };
             }
 
+            // Se existe, obter informações detalhadas
+            const detailsCommand = `ls -la "${remotePath}" 2>/dev/null`;
+            const detailsResult = await this.executeCommand(serverId, detailsCommand);
+            
             return { 
                 exists: true, 
-                info: result.stdout,
-                size: this.extractFileSize(result.stdout),
-                permissions: this.extractPermissions(result.stdout)
+                info: detailsResult.stdout,
+                size: this.extractFileSize(detailsResult.stdout),
+                permissions: this.extractPermissions(detailsResult.stdout)
             };
         } catch (error) {
             return { exists: false };

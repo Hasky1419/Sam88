@@ -576,7 +576,6 @@ router.post('/upload', authMiddleware, upload.single('video'), async (req, res) 
       try {
         const PlaylistSMILService = require('../services/PlaylistSMILService');
         await PlaylistSMILService.updateUserSMIL(userId, userLogin, serverId);
-        console.log(`✅ Arquivo SMIL atualizado após upload para usuário ${userLogin}`);
       } catch (smilError) {
         console.warn('Erro ao atualizar arquivo SMIL:', smilError.message);
       }
@@ -935,7 +934,6 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       try {
         const PlaylistSMILService = require('../services/PlaylistSMILService');
         await PlaylistSMILService.updateUserSMIL(userId, userLogin, serverId);
-        console.log(`✅ Arquivo SMIL atualizado após remoção de vídeo para usuário ${userLogin}`);
       } catch (smilError) {
         console.warn('Erro ao atualizar arquivo SMIL:', smilError.message);
       }

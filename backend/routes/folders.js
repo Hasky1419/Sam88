@@ -110,21 +110,7 @@ router.post('/', authMiddleware, async (req, res) => {
       // Criar a pasta específica no servidor via SSH no caminho correto
       await SSHManager.createUserFolder(serverId, userLogin, sanitizedName);
       
-      console.log(`✅ Pasta ${sanitizedName} criada no servidor para usuário ${userLogin}`);
-      console.log(`📁 Caminho completo: ${caminhoServidor}`);
-      
-      // Verificar se pasta foi realmente criada
-      const checkCommand = `test -d "${caminhoServidor}" && echo "EXISTS" || echo "NOT_EXISTS"`;
-      const checkResult = await SSHManager.executeCommand(serverId, checkCommand);
-      
-      if (!checkResult.stdout.includes('EXISTS')) {
-        throw new Error(`Pasta não foi criada no servidor: ${caminhoServidor}`);
-      }
-      
-      console.log(`✅ Pasta verificada no servidor: ${caminhoServidor}`);
-
-      // Aguardar um pouco para garantir que pasta foi criada
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log(`✅ Pasta ${sanitizedName} criada no servidor`);
       
     } catch (sshError) {
       console.error('Erro ao criar pasta no servidor:', sshError);
@@ -140,7 +126,6 @@ router.post('/', authMiddleware, async (req, res) => {
     try {
       const PlaylistSMILService = require('../services/PlaylistSMILService');
       await PlaylistSMILService.updateUserSMIL(userId, userLogin, serverId);
-      console.log(`✅ Arquivo SMIL atualizado após criar pasta para usuário ${userLogin}`);
     } catch (smilError) {
       console.warn('Erro ao atualizar arquivo SMIL:', smilError.message);
     }
@@ -413,46 +398,20 @@ router.get('/:id/info', authMiddleware, async (req, res) => {
     let serverInfo = null;
     try {
       const remoteFolderPath = `/home/streaming/${userLogin}/${folderName}`;
-      const checkCommand = `test -d "${remoteFolderPath}" && ls -la "${remoteFolderPath}" | head -1 || echo "NOT_EXISTS"`;
-      const checkResult = await SSHManager.executeCommand(serverId, checkCommand);
       
-      if (!checkResult.stdout.includes('NOT_EXISTS')) {
-        // Contar arquivos na pasta
-        const countCommand = `find "${remoteFolderPath}" -type f | wc -l`;
-        const countResult = await SSHManager.executeCommand(serverId, countCommand);
-        const fileCount = parseInt(countResult.stdout.trim()) || 0;
-        
-        // Calcular tamanho da pasta
-        const sizeCommand = `du -sb "${remoteFolderPath}" 2>/dev/null | cut -f1 || echo "0"`;
-        const sizeResult = await SSHManager.executeCommand(serverId, sizeCommand);
-        const folderSize = parseInt(sizeResult.stdout.trim()) || 0;
-        
-        serverInfo = {
-          exists: true,
-          file_count: fileCount,
-          size_bytes: folderSize,
-          size_mb: Math.ceil(folderSize / (1024 * 1024)),
-          path: remoteFolderPath
-        };
-        
-        // Atualizar espaço usado se há diferença significativa
-        const serverSizeMB = Math.ceil(folderSize / (1024 * 1024));
+      // Usar método otimizado que faz tudo em uma chamada
+      serverInfo = await SSHManager.getFolderInfo(serverId, remoteFolderPath);
+      
+      // Atualizar espaço usado se há diferença significativa
+      if (serverInfo.exists) {
+        const serverSizeMB = serverInfo.size_mb;
         if (Math.abs(serverSizeMB - (folder.espaco_usado || 0)) > 5) {
           await db.execute(
             'UPDATE folders SET espaco_usado = ? WHERE id = ?',
             [Math.max(serverSizeMB, realUsedMB), folderId]
           );
           folder.espaco_usado = Math.max(serverSizeMB, realUsedMB);
-          console.log(`📊 Espaço da pasta ${folderName} atualizado: ${folder.espaco_usado}MB`);
         }
-      } else {
-        serverInfo = {
-          exists: false,
-          file_count: 0,
-          size_bytes: 0,
-          size_mb: 0,
-          path: remoteFolderPath
-        };
       }
     } catch (sshError) {
       console.warn('Erro ao verificar pasta no servidor:', sshError.message);
@@ -512,22 +471,13 @@ router.post('/:id/sync', authMiddleware, async (req, res) => {
       // Garantir que pasta específica existe
       await SSHManager.createUserFolder(serverId, userLogin, folderName);
       
-      // Limpar arquivos temporários e corrompidos
-      const cleanupCommand = `find "/home/streaming/${userLogin}/${folderName}" -type f \\( -name "*.tmp" -o -name "*.part" -o -size 0 \\) -delete 2>/dev/null || true`;
-      await SSHManager.executeCommand(serverId, cleanupCommand);
-      
-      // Definir permissões corretas
-      const folderPath = `/home/streaming/${userLogin}/${folderName}`;
-      await SSHManager.executeCommand(serverId, `chmod -R 755 "${folderPath}"`);
-      await SSHManager.executeCommand(serverId, `chown -R streaming:streaming "${folderPath}"`);
-      
-      console.log(`✅ Pasta ${folderName} sincronizada com servidor`);
+      console.log(`✅ Pasta ${folderName} sincronizada`);
       
       res.json({
         success: true,
         message: 'Pasta sincronizada com sucesso',
         folder_name: folderName,
-        server_path: folderPath
+        server_path: `/home/streaming/${userLogin}/${folderName}`
       });
     } catch (sshError) {
       console.error('Erro na sincronização:', sshError);

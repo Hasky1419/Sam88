@@ -22,12 +22,10 @@ class PlaylistSMILService {
             console.log(`📄 Gerando arquivo SMIL para usuário: ${userLogin}`);
 
             // Verificar se diretório do usuário existe
-            const SSHManager = require('../config/SSHManager');
             const userPath = `/home/streaming/${userLogin}`;
-            const pathExists = await SSHManager.checkDirectoryExists(serverId, userPath);
+            const pathInfo = await SSHManager.getFolderInfo(serverId, userPath);
             
-            if (!pathExists) {
-                console.log(`📁 Criando diretório para usuário ${userLogin}...`);
+            if (!pathInfo.exists) {
                 await SSHManager.createUserDirectory(serverId, userLogin);
             }
 
@@ -54,7 +52,6 @@ class PlaylistSMILService {
                 [userId]
             );
             if (playlistRows.length === 0) {
-                console.log(`⚠️ Usuário ${userLogin} não possui playlists`);
                 // Criar arquivo SMIL vazio mesmo sem playlists
                 const emptySmilContent = this.generateEmptySMIL(userLogin);
                 const smilPath = `/home/streaming/${userLogin}/playlists_agendamentos.smil`;
@@ -62,7 +59,7 @@ class PlaylistSMILService {
                 try {
                     await this.saveSMILToServer(serverId, userLogin, emptySmilContent, smilPath);
                 } catch (smilError) {
-                    console.warn('Aviso: Não foi possível criar arquivo SMIL:', smilError.message);
+                    console.warn('Aviso SMIL:', smilError.message);
                     // Continuar sem falhar
                 }
                 
@@ -84,11 +81,10 @@ class PlaylistSMILService {
             try {
                 await this.saveSMILToServer(serverId, userLogin, smilContent, smilPath);
             } catch (smilError) {
-                console.warn('Aviso: Não foi possível salvar arquivo SMIL:', smilError.message);
+                console.warn('Aviso SMIL:', smilError.message);
                 // Continuar sem falhar
             }
 
-            console.log(`✅ Arquivo SMIL gerado com sucesso para ${userLogin}`);
             return { 
                 success: true, 
                 smil_path: smilPath,
@@ -302,7 +298,6 @@ class PlaylistSMILService {
             // Verificar se arquivo já existe
             const fileExists = await SSHManager.getFileInfo(serverId, smilPath);
             if (fileExists.exists) {
-                console.log(`📄 Arquivo SMIL já existe: ${smilPath}`);
                 return { success: true, path: smilPath };
             }
 
@@ -330,7 +325,6 @@ class PlaylistSMILService {
             // Limpar arquivo temporário
             await fs.unlink(tempFile);
 
-            console.log(`📤 Arquivo SMIL enviado para: ${smilPath}`);
             return { success: true, path: smilPath };
 
         } catch (error) {
