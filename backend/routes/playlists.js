@@ -226,7 +226,6 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     const serverId = serverRows.length > 0 ? serverRows[0].servidor_id : 1;
     
     await PlaylistSMILService.updateUserSMIL(req.user.id, userLogin, serverId);
-    console.log(`✅ Arquivo SMIL atualizado após remoção da playlist para usuário ${userLogin} em /home/streaming/${userLogin}/playlists_agendamentos.smil`);
   } catch (smilError) {
     console.warn('Erro ao atualizar arquivo SMIL:', smilError.message);
   };
